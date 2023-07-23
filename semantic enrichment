@@ -1,0 +1,69 @@
+import re
+from nltk.corpus import wordnet
+import nlpaug.augmenter.word as naw
+from tqdm.auto import tqdm
+from numpy import random
+
+# Change 'TECHNOVATION' to 'technology innovation'
+pd_train['SO'].replace('TECHNOVATION', 'technology innovation', inplace=True)
+
+# Create a separate label column
+pd_train["SO_clean"] = pd_train["SO"]
+
+# Assign Cleaning Criteria
+REPLACE_BY_SPACE_RE = re.compile('[/(){}\[\]\|@,;.&!--#$%^*_+"”:<>"'"'"'?`~Â½¾]')
+STOPWORDS = set(stopwords.words('english'))
+STOPWORDS.add('journal')
+STOPWORDS.add('international')
+STOPWORDS.add('european')
+STOPWORDS.add('research')
+
+# Define Cleaning Sequence
+def clean_text(text):
+    text = re.sub('\d+', ' ', text) # remove digits
+    text = text.lower() # lowercase text
+    text = REPLACE_BY_SPACE_RE.sub(' ', text) # replace REPLACE_BY_SPACE_RE symbols by space in text
+    text = re.sub(r"\b[a-zA-Z]\b", ' ', text) # single character removal
+    text = re.sub(r'\s+', ' ', text) # remove multiple spaces
+    text = ' '.join(word for word in text.split() if word not in STOPWORDS) # delete stopwords from text
+    return text
+
+# Clean SO column
+pd_train['SO_clean'] = pd_train['SO_clean'].apply(clean_text)
+
+# Remove Blank Rows
+pd_train['SO_clean'].replace('', np.nan, inplace=True)
+pd_train.dropna(subset=['SO_clean'], inplace=True)
+
+# Generate augmented label text in new column for all rows
+pd_train['SO_aug'] = np.nan
+rand_aug = naw.RandomWordAug()
+tqdm.pandas(desc="Augmenting Text")
+pd_train['SO_aug'] = pd_train['SO_clean'].progress_apply(rand_aug.augment)
+
+# Convert augmented text to string
+pd_train['SO_aug'] = pd_train['SO_aug'].str[0]
+
+# Tokenize the augmented text
+pd_train['SO_aug'] = pd_train['SO_aug'].apply(lambda x: x.split() if isinstance(x, str) else x)
+
+# Select one word from the token list
+pd_train['SO_aug'] = pd_train['SO_aug'].apply(lambda x: random.choice(x) if isinstance(x, list) else x)
+
+# Generate a new column with the original text with the new word added as the last word in the text
+pd_train["ID_le"] = pd_train["ID"] + ' ' + pd_train["SO_aug"].astype(str)
+
+# Create df3 for ori ID and SO columns
+df3 = pd_train.filter(['ID','SO'], axis=1)
+
+# Create df4 for semantically enhanced ID and SO
+df4 = pd_train.filter(['ID_le','SO'], axis=1)
+
+# Rename 'ID' column of df3
+df4.rename(columns={'ID_le':'ID'}, inplace=True)
+
+# Append df3 to df4
+df = df3.append(df4)
+
+# Change 'technology innovation' back to 'TECHNOVATION'
+df['SO'].replace('technology innovation', 'TECHNOVATION', inplace=True)
