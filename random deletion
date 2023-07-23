@@ -1,0 +1,25 @@
+import nlpaug.augmenter.char as nac
+import pandas as pd
+
+def augment_class_using_nlpaug(data, label, target_size=800):
+    class_data = data[data['SO'] == label]
+    augmented_data = class_data.copy()
+    # Create an augmenter
+    augmenter = nac.RandomCharAug(action="delete")
+
+    while len(augmented_data) < target_size:
+        sample = class_data.sample(1)
+        augmented_text = augmenter.augment(sample.iloc[0]['ID'])
+        augmented_sample = pd.DataFrame({'ID': [augmented_text], 'SO': [label]})
+        augmented_data = pd.concat([augmented_data, augmented_sample], axis=0)
+
+    return augmented_data.iloc[:target_size]
+
+labels = df['SO'].unique()
+df_augmented = pd.DataFrame()  # Change the name here.
+
+for label in labels:
+    augmented_class_data = augment_class_using_nlpaug(df, label, target_size=800)
+    df_augmented = pd.concat([df_augmented, augmented_class_data], axis=0) 
+
+
