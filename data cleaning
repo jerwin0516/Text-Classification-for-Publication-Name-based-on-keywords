@@ -1,0 +1,51 @@
+import string
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import word_tokenize
+import nltk
+nltk.download('wordnet')
+nltk.download('stopwords')
+import pandas as pd
+from sklearn.model_selection import train_test_split
+  
+def get_source_data():
+    df = pd.read_csv("pathoffile", usecols=['ID', 'SO'])
+    # Drop rows where 'ID' is missing
+    df = df.dropna(subset=['ID'])
+    df = df[df.groupby('SO')['SO'].transform('size') > 1]
+    df = df[df['ID'].astype(bool)]  # Drop rows where 'ID' is empty
+    return df
+
+data = get_source_data()
+
+# Split into X (input features) and y (target variable)
+X = data.ID
+y = data.SO
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=808, stratify=y)
+# Concatenate X_train and y_train
+pd_train = pd.concat([X_train, y_train], axis=1)
+# Concatenate X_test and y_test
+pd_test = pd.concat([X_test, y_test], axis=1)
+  
+# Initialize the lemmatizer
+lemmatizer = WordNetLemmatizer()
+
+def preprocess_text(text):
+    # Split the text by semicolon
+    tokens = text.split(';')
+    # Trim whitespace, replace dashes with spaces and convert to lowercase
+    tokens = [token.strip().replace('-', ' ').lower() for token in tokens]
+    # Remove punctuation
+    tokens = [token.translate(str.maketrans('', '', string.punctuation)) for token in tokens]
+    # Lemmatize the tokens
+    tokens = [lemmatizer.lemmatize(token) for token in tokens]
+    # Combine lemmatized tokens back into a string without semicolons
+    text = ' '.join(tokens)  # Use space as the delimiter instead of semicolon
+
+    return text
+      
+# Apply the preprocessing to each text in the dataset
+pd_test['ID'] = pd_test['ID'].apply(preprocess_text)
+pd_train['ID'] = pd_train['ID'].apply(preprocess_text)
+print(pd_test)
