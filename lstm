@@ -1,0 +1,88 @@
+# Import necessary libraries
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, LSTM, Dense
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.metrics import classification_report, f1_score
+
+np.random.seed(808)  # Set numpy random seed
+tf.random.set_seed(808)
+
+# Load Glove model
+def load_glove_model(glove_file):
+    embeddings = {}
+    with open(glove_file, 'r') as f:
+        for line in f:
+            split_line = line.split()
+            word = split_line[0]
+            embedding = np.array([float(val) for val in split_line[1:]])
+            embeddings[word] = embedding
+    return embeddings
+
+# Load Data
+train_data = df
+test_data = pd_test
+
+X_train = train_data.ID.astype(str)  # Convert ID column to string
+y_train = train_data.SO
+
+X_test = test_data.ID.astype(str)  # Convert ID column to string
+y_test = test_data.SO
+
+# Label encoding for target variable
+label_encoder = LabelEncoder()
+y_train = label_encoder.fit_transform(y_train)
+y_test = label_encoder.transform(y_test)
+
+# Tokenization and padding
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(X_train)
+
+sequences_train = tokenizer.texts_to_sequences(X_train)
+sequences_test = tokenizer.texts_to_sequences(X_test)
+
+X_train_padded = pad_sequences(sequences_train, maxlen=100)
+X_test_padded = pad_sequences(sequences_test, maxlen=100)
+
+# Load Glove embeddings
+glove_model = load_glove_model('/content/drive/MyDrive/glove.6B.300d.txt')
+
+# LSTM Model
+vocab_size = len(tokenizer.word_index) + 1
+embedding_dim = 300
+max_length = X_train_padded.shape[1]
+
+embedding_matrix = np.zeros((vocab_size, embedding_dim))
+
+for word, i in tokenizer.word_index.items():
+    embedding_vector = glove_model.get(word)
+    if embedding_vector is not None:
+        embedding_matrix[i] = embedding_vector
+
+model = Sequential()
+model.add(Embedding(input_dim=vocab_size, output_dim=embedding_dim, weights=[embedding_matrix], input_length=max_length, trainable=False))
+model.add(LSTM(units=64))  # Using unidirectional LSTM with fewer units
+model.add(Dense(units=len(label_encoder.classes_), activation='softmax'))
+
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+model.summary()
+
+# Early Stopping
+early_stopping = EarlyStopping(monitor='val_loss', patience=3, min_delta=0.0001)
+
+# Train the model
+history = model.fit(X_train_padded, y_train, epochs=10, batch_size=128, validation_data=(X_test_padded, y_test), callbacks=[early_stopping])
+
+# Test Model
+y_pred = model.predict(X_test_padded)
+y_pred2 = np.argmax(y_pred, axis=1)
+f1 = f1_score(y_test, y_pred2, average='macro')
+
+print('F1 Score:', f1)
+print(classification_report(y_test, y_pred2))
