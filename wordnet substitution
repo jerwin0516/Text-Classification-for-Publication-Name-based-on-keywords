@@ -38,6 +38,7 @@ df_combined, all_augmented_df = augmentMyData(df_combined)
 # Save the combined DataFrame to a CSV file
 df_combined['ID'] = df_combined['ID'].apply(lambda x: ' '.join(filter(None, x)) if isinstance(x, list) else x)
 df_combined.to_csv("yourpath", index=False)
+df_combined = df_combined.drop_duplicates(keep=False)
 
 # Save all the augmented data to a separate CSV file
 all_augmented_df['ID'] = all_augmented_df['ID'].apply(lambda x: ' '.join(filter(None, x)) if isinstance(x, list) else x)
