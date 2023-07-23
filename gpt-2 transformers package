@@ -1,0 +1,222 @@
+import nltk
+import string
+from nltk.corpus import stopwords
+from transformers import pipeline, set_seed
+
+source_list = df['SO'].unique().tolist()
+
+def process_list(source_list):
+    nltk.download('stopwords')
+    # create a set of English stopwords except "and" 
+    stop_words = set(stopwords.words('english')) - {'and'}
+    # 'journal' and 'international' added to the set of stopwords
+    stop_words.update(['journal', 'international', 'european', 'research', 'russian', 'african', 'asia', 'scandinavian'])
+    
+def process_text(text):
+        text = text.replace('R & D', 'Research and Development')
+        # Replace '&' with 'and'
+        text = text.replace('&', 'AND')        
+        # Remove punctuation
+        text = text.translate(str.maketrans('', '', string.punctuation))
+        # Remove stopwords (but not 'and'), 'journal', 'international'
+        words = [word for word in text.split() if word.lower() not in stop_words]
+        # Convert the list of words back to a phrase
+        processed_text = ' '.join(words)
+        return processed_text
+    processed_list = []
+    for text in source_list:
+        processed_list.append(process_text(text))
+    return processed_list
+
+# Apply the function on the list of sources
+processed_sources = process_list(source_list)
+
+# text generation model "gpt2-xl" is used with seed set to 808 
+def generate_synonyms(terms, model_name='gpt2-xl', seed=808):
+    set_seed(seed) 
+    generator = pipeline('text-generation', model=model_name) 
+    # create an empty dictionary to store the generated text for each term.
+    generated_texts_dict = {}
+
+    for term in processed_sources:
+        prompt = f"List out related concepts or phrases associated with the field of '{term}':"
+        # maximum length for the generated text is set to 50 and 40 different sequences to be returned.
+        texts = generator(prompt, max_length=50, num_return_sequences=40)
+        # generated text from the output of the pipeline and add it to the dictionary under the key corresponding to the current term.
+        generated_texts = [t['generated_text'] for t in texts]
+        generated_texts_dict[term] = generated_texts
+
+    return generated_texts_dict
+generated_texts_dict = generate_synonyms(processed_sources)
+from nltk.tokenize import word_tokenize
+from nltk import pos_tag
+import re
+
+# Define a function to process a text string
+def process_text(text, term):
+    # Get a set of English stop words
+    stop_words = set(stopwords.words('english'))
+    # Remove the prompt used for text generation
+    text = text.replace(f"List out related concepts or phrases associated with the field of '{term}':", "")
+    # Remove URLs from the text
+    text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
+    # Remove punctuation from the text
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    # Replace multiple spaces with a single space
+    text = re.sub(r'\s+', ' ', text)
+    # Tokenize the text into words
+    words = word_tokenize(text)
+    # Remove stop words from the list of words
+    words = [word for word in words if word.lower() not in stop_words]
+    # Remove duplicate words, the term itself, and numeric values
+    words = list(set(words))
+    words = [word for word in words if word.lower() != term.lower() and not word.isnumeric()]
+    # Keep only nouns (this uses part-of-speech tagging to identify nouns)
+    words = [word for word, pos in pos_tag(words) if pos.startswith('NN')]
+    # Join the words back together into a string
+    processed_text = ' '.join(words)
+    
+    return processed_text
+
+
+# Define a function to process a dictionary of generated texts
+def process_generated_texts(generated_texts_dict):
+    # Initialize an empty dictionary to hold the processed texts
+    stop_word_removed_dict = {}
+    # Loop over each term and its associated texts in the input dictionary
+    for term, texts in generated_texts_dict.items():
+        stop_word_removed_texts = []
+        # Process each text and add it to the list of processed texts
+        for text in texts:
+            processed_text = process_text(text, term)
+            stop_word_removed_texts.append(processed_text)
+        # Add the list of processed texts to the new dictionary
+        stop_word_removed_dict[term] = stop_word_removed_texts
+    return stop_word_removed_dict
+
+# Process the generated texts for each term
+stop_word_removed_dict = process_generated_texts(generated_texts_dict)
+
+from nltk import pos_tag
+from keybert import KeyBERT
+import wordninja
+import spacy
+
+nltk.download('words')
+from nltk.corpus import words
+
+def extract_keywords(stop_word_removed_dict, terms):
+    # Initialize KeyBERT model
+    kw_model = KeyBERT('sentence-transformers/distilbert-base-nli-mean-tokens')
+    # Load the English language model in spaCy for lemmatization
+    nlp = spacy.load('en_core_web_sm')  
+    
+    # Create a list of term words and a list of terms in lowercase
+    term_words = [word.lower() for term in terms for word in term.split()]
+    terms_lower = [term.lower() for term in terms]  
+
+    # Initialize dictionary to store the filtered keywords
+    filtered_keywords_dict = {}  
+
+    # Loop over each term and its associated documents
+    for term, docs in stop_word_removed_dict.items():
+        filtered_keywords = [] # List to store filtered keywords for the current term
+        seen_keywords = set()  # Set to store keyword phrases in their sorted form
+        for i, doc in enumerate(docs):
+            # Split concatenated words in the document using wordninja
+            doc = ' '.join(wordninja.split(doc))
+            # Extract keywords from the document using the KeyBERT model
+            keywords = kw_model.extract_keywords(doc, keyphrase_ngram_range=(1, 4), stop_words='english', top_n=25)
+            current_filtered_keywords = [] # List to store filtered keywords for the current document
+            # Loop over each keyword and its associated score
+            for kw, score in keywords:
+                # Lemmatize the keyword using spaCy
+                kw_lemmatized = ' '.join([token.lemma_ for token in nlp(kw)])  
+                words_lemmatized = kw_lemmatized.split()                
+                # Skip if any word in the lemmatized keyword is repeated
+                if len(words_lemmatized) != len(set(words_lemmatized)):
+                    continue                
+                # checking if the keyword is made up of two words
+                if len(words_lemmatized) == 2:
+                    # sorts the words alphabetically and then joins them together with a space between them.
+                    sorted_keyword = ' '.join(sorted(words_lemmatized))
+                    # Skip if the keyword (in its sorted form) has already been added
+                    if sorted_keyword in seen_keywords:
+                        continue                
+                    # prevent unnecessary duplicate processing of the same two-word keywords
+                    seen_keywords.add(sorted_keyword)                    
+                    #  checks if all the words in the keyword are part of the term. 
+                    if not all(word in term_words for word in words_lemmatized):
+                        # assigns a part-of-speech tag to each lemmatized word in the keyword
+                        pos_tags = pos_tag(words_lemmatized)
+                        # skips the keyword if all its words are verbs
+                        if all(tag.startswith('V') for _, tag in pos_tags):
+                            continue                   
+                    # Check if both words are in the nltk words corpus or are abbreviations
+                    if all(word.lower() in words.words() or word.isupper() for word in words_lemmatized):
+                        # adds the keyword to a list if its score is greater than 0.60
+                        if score > 0.55:
+                            current_filtered_keywords.append((kw_lemmatized, score))                         
+                else:  # For keywords with more than two words
+                    # Check if all words are in the nltk words corpus or are abbreviations
+                    if all(word.lower() in words.words() or word.isupper() for word in words_lemmatized):
+                        # adds the keyword to a list if its score is greater than 0.55 and none of the terms are in the keyword
+                        if score > 0.55 and all(term not in kw_lemmatized.lower() for term in term_words):
+                            current_filtered_keywords.append((kw_lemmatized, score))
+            current_filtered_keywords = list(dict(current_filtered_keywords).items())
+            filtered_keywords.extend(current_filtered_keywords)
+        filtered_keywords = list(dict(filtered_keywords).items())
+        filtered_keywords_dict[term] = filtered_keywords
+    # Return the dictionary containing the filtered keywords for each term
+    return filtered_keywords_dict
+# Use the function to extract keywords
+filtered_keywords_dict = extract_keywords(stop_word_removed_dict, processed_sources)
+
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+
+# Load the sentence transformer model
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+def calculate_similarities(filtered_keywords_dict, similarity_threshold=0.40):
+    filtered_keywords_similarity_dict = {}  # Create an empty dict to store the filtered keywords and their similarity scores for each term
+    for term, filtered_keywords in filtered_keywords_dict.items():
+        # Convert the term to a sentence embedding
+        reference_embedding = model.encode([term])
+        # Convert the filtered keywords for the current term to sentence embeddings
+        keyword_embeddings = model.encode([kw for kw, score in filtered_keywords])
+        # Calculate the cosine similarity between the keyword embeddings and the reference embedding
+        similarities = cosine_similarity(keyword_embeddings, reference_embedding)
+        # Create a DataFrame to store the keywords and their similarity scores
+        df_keywords = pd.DataFrame(filtered_keywords, columns=['ID', 'Score'])
+        df_keywords['Similarity'] = similarities
+        # Filter for a similarity threshold
+        df_filtered_keywords = df_keywords[df_keywords['Similarity'] >= similarity_threshold]
+        # Sort the filtered keywords by similarity score in descending order
+        df_filtered_keywords = df_filtered_keywords.sort_values(by=['Similarity', 'Score'], ascending=False)
+        # Store the filtered keywords in the dictionary
+        filtered_keywords_similarity_dict[term] = df_filtered_keywords
+
+    return filtered_keywords_similarity_dict
+filtered_keywords_similarity_dict = calculate_similarities(filtered_keywords_dict)
+
+# Create a dictionary mapping processed sources to original sources
+source_dict = dict(zip(processed_sources, source_list))
+# Initialize empty list to store dataframes
+dataframes = []
+# Loop over items in the dictionary
+for source, temp_df in filtered_keywords_similarity_dict.items():
+    # Select only the 'ID' column
+    temp_df = temp_df[['ID']]    
+    # Map the processed source to the original source
+    original_source = source_dict[source]
+    # Create a new column 'SO' with the original source value
+    temp_df['SO'] = original_source
+    # Append to the list
+    dataframes.append(temp_df)
+# Concatenate all DataFrames in the list
+combined_df = pd.concat(dataframes, ignore_index=True)
+# Reorder the columns
+combined_df = combined_df[['SO', 'ID']]
+final_df = pd.concat([df, combined_df], ignore_index=True)
+
