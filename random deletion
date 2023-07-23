@@ -21,5 +21,5 @@ df_augmented = pd.DataFrame()  # Change the name here.
 for label in labels:
     augmented_class_data = augment_class_using_nlpaug(df, label, target_size=800)
     df_augmented = pd.concat([df_augmented, augmented_class_data], axis=0) 
-
+df_augmented = df_augmented.drop_duplicates(keep=False)
 
