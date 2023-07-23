@@ -1,0 +1,44 @@
+import nlpaug.augmenter.word as naw
+from tqdm import tqdm
+import os
+
+# Augment Argument
+wordnet = naw.SynonymAug(aug_src='wordnet')
+
+def augmentMyData(df, target_samples=200):
+    classes_to_augment = df['SO'].value_counts()[df['SO'].value_counts() < target_samples].index
+    all_augmented_df = pd.DataFrame() # Dataframe to store all augmented data
+    for selectedclass in classes_to_augment:
+        filter_df = df[df['SO'] == selectedclass].reset_index(drop=True) # removes unnecessary index column
+        num_existing_samples = len(filter_df)
+        if num_existing_samples >= target_samples:
+            continue  # Skip augmentation if the class already has enough samples
+        num_augmented_samples = target_samples - num_existing_samples
+        augmented_texts = []
+        for i in tqdm(range(len(filter_df))):
+            # generating 'num_augmented_samples' augmented texts
+            for _ in range(int(num_augmented_samples / len(filter_df))): # Divide by the number of samples in the class to prevent over-augmentation
+                augmented_text = wordnet.augment(filter_df['ID'].iloc[i])
+                # Check if the augmented text already exists in the data
+                if augmented_text not in df['ID'].values and augmented_text not in augmented_texts:
+                    augmented_texts.append(augmented_text)
+        actual_num_augmented_samples = min(num_augmented_samples, len(augmented_texts))
+        data = {
+            'ID': augmented_texts[:actual_num_augmented_samples],
+            'SO': [selectedclass for _ in range(actual_num_augmented_samples)]
+        }
+        aug_df = pd.DataFrame(data)
+        df = df.append(aug_df)
+        all_augmented_df = all_augmented_df.append(aug_df)  # Add the aug_df to the all_augmented_df
+    return df, all_augmented_df  # Return both df and the all_augmented_df
+
+# Run Augment
+df_combined, all_augmented_df = augmentMyData(df_combined)
+
+# Save the combined DataFrame to a CSV file
+df_combined['ID'] = df_combined['ID'].apply(lambda x: ' '.join(filter(None, x)) if isinstance(x, list) else x)
+df_combined.to_csv("yourpath", index=False)
+
+# Save all the augmented data to a separate CSV file
+all_augmented_df['ID'] = all_augmented_df['ID'].apply(lambda x: ' '.join(filter(None, x)) if isinstance(x, list) else x)
+all_augmented_df.to_csv("yourpath", index=False)
