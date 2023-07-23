@@ -1,0 +1,61 @@
+import nlpaug.augmenter.word as naw
+# Initialize the Augmenter
+aug = naw.RandomWordAug(action="swap", aug_p=0.3)
+
+def augment_classes_to_target(df, target_samples=200, max_iterations=1000):
+    underrepresented_classes = df['SO'].value_counts()[df['SO'].value_counts() < target_samples].index
+    df_augmented = pd.DataFrame()  # DataFrame to store augmented data
+    for selected_class in underrepresented_classes:
+        df_class = df[df['SO'] == selected_class].copy()
+        samples_to_augment = df_class['ID'].tolist()
+        num_samples_to_augment = target_samples - len(df_class)
+        augmented_texts = []
+        iteration = 0
+
+        # Convert the existing data to lowercase for case-insensitive comparison
+        existing_data_lower = set(map(str.lower, df['ID'].values))
+        augmented_texts_lower = set()
+
+        while len(augmented_texts) < num_samples_to_augment:
+            # Break the loop if max_iterations is reached
+            if iteration >= max_iterations:
+                break
+
+            new_samples = []
+            for sample in samples_to_augment:
+                augmented_text = aug.augment(sample)
+
+                # If the augmented_text is a list, convert it to a string
+                if isinstance(augmented_text, list):
+                    augmented_text = ' '.join(augmented_text)
+
+                # Perform case-insensitive check for duplicates
+                if augmented_text.lower() not in existing_data_lower and augmented_text.lower() not in augmented_texts_lower:
+                    augmented_texts.append(augmented_text)
+                    augmented_texts_lower.add(augmented_text.lower())
+                    new_samples.append(augmented_text)
+                    if len(augmented_texts) >= num_samples_to_augment:
+                        break
+            samples_to_augment.extend(new_samples)  # Update the list with newly generated samples
+
+            iteration += 1
+
+        # Create a DataFrame with the augmented samples
+        df_class_augmented = pd.DataFrame({
+            'ID': augmented_texts,
+            'SO': [selected_class for _ in range(len(augmented_texts))]
+        })
+
+        # Append the augmented data to the DataFrame
+        df_augmented = pd.concat([df_augmented, df_class_augmented])
+
+    return df_augmented
+
+# Apply the function
+df_minority_augmented = augment_classes_to_target(df, target_samples=200)
+
+# Append the augmented DataFrame to the original DataFrame
+df_combined = pd.concat([df, df_minority_augmented])
+# Converting the 'ID' column from a list of strings (if it was in that format) into a single string with the individual elements separated by spaces
+df_combined['ID'] = df_combined['ID'].apply(lambda x: ' '.join(filter(None, x)) if isinstance(x, list) else x)
+df_combined = df_combined.drop_duplicates(keep=False)
